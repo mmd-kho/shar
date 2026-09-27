@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>شارژیار | مدیریت شارژ ساختمان</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/rastikerdar/vazirmatn@v33.003/Vazirmatn-font-face.css">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;font-family:Vazirmatn,Tahoma,sans-serif}
+body{background:#f0f4f3;min-height:100vh;color:#1a2b32}
+.container{max-width:900px;margin:0 auto;padding:20px}
+.card{background:#fff;border-radius:16px;padding:24px;box-shadow:0 2px 12px rgba(0,0,0,.06);margin-bottom:20px}
+h1{font-size:26px;margin-bottom:8px}
+h2{font-size:19px;margin-bottom:14px}
+.sub{color:#6b7c85;font-size:14px;margin-bottom:20px}
+input,select{width:100%;padding:11px 14px;border:1.5px solid #d5e0dc;border-radius:10px;font-size:15px;margin-bottom:12px;background:#fbfdfc}
+input:focus{outline:none;border-color:#16a085}
+.btn{display:inline-block;background:#16a085;color:#fff;border:none;border-radius:10px;padding:11px 22px;font-size:15px;cursor:pointer;font-family:Vazirmatn}
+.btn:hover{background:#11866f}
+.btn-gray{background:#eceff1;color:#37474f}
+.btn-red{background:#fdecea;color:#c0392b}
+.btn-sm{padding:6px 14px;font-size:13px;border-radius:8px}
+.tabs{display:flex;gap:10px;margin-bottom:20px}
+.tabs button{flex:1;padding:10px;border:none;border-radius:10px;background:#e0eae7;color:#456;cursor:pointer;font-family:Vazirmatn;font-size:15px}
+.tabs button.active{background:#16a085;color:#fff}
+.code-box{display:flex;align-items:center;gap:10px;background:#e8f6f2;border:2px dashed #16a085;border-radius:12px;padding:14px;justify-content:center;margin-bottom:8px}
+.code-box b{font-size:28px;letter-spacing:4px;color:#0e6655}
+.stat-row{display:flex;gap:12px;flex-wrap:wrap;margin:16px 0}
+.stat{flex:1;min-width:140px;background:#fff;border-radius:14px;padding:16px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.05)}
+.stat .v{font-size:20px;font-weight:bold;color:#0e6655;margin-top:4px}
+.stat .t{font-size:13px;color:#6b7c85}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px;text-align:right;border-bottom:1px solid #eef2f1;font-size:14px}
+th{color:#6b7c85;font-weight:600}
+.badge{padding:4px 10px;border-radius:20px;font-size:12px;display:inline-block}
+.b-ok{background:#e8f6f2;color:#0e6655}
+.b-wait{background:#fef5e7;color:#b9770e}
+.b-debt{background:#fdecea;color:#c0392b}
+.exp-item{display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid #eef2f1}
+.topbar{background:#fff;box-shadow:0 1px 8px rgba(0,0,0,.06);padding:14px 20px;display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;flex-wrap:wrap;gap:10px}
+.topbar .brand{font-weight:bold;font-size:18px;color:#16a085}
+.muted{color:#6b7c85;font-size:13px}
+.empty{color:#90a4ae;text-align:center;padding:20px;font-size:14px}
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+// ⬇️⬇️ فقط این دو خط رو با مقادیر خودت عوض کن ⬇️⬇️
+const SUPABASE_URL = "https://sdgtbcuratnzpozurdil.supabase.co";
+const SUPABASE_KEY = "sb_publishable_YLQlBDQ0CGFl8cv5XPWmlA_IXq9eNj2";
+
+const sb = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+const app = document.getElementById('app');
+let me = null, building = null;
+const currentMonth = new Intl.DateTimeFormat('fa-IR',{month:'long',year:'numeric'}).format(new Date());
+const fmt = n => Number(n||0).toLocaleString('fa-IR');
+const toFa = s => String(s??'').replace(/\d/g,d=>'۰۱۲۳۴۵۶۷۸۹'[d]);
+function genCode(){const c='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';let r='';for(let i=0;i<6;i++)r+=c[Math.floor(Math.random()*c.length)];return r;}
+
+async function init(){
+  const {data:{session}} = await sb.auth.getSession();
+  if(session){ await loadMe(); } else { renderAuth(); }
+}
+async function loadMe(){
+  const {data:{user}} = await sb.auth.getUser();
+  if(!user){ renderAuth(); return; }
+  const {data:p} = await sb.from('profiles').select('*').eq('id',user.id).single();
+  me = p;
+  if(!me){ renderAuth(); return; }
+  if(me.building_id){
+    const {data:b} = await sb.from('buildings').select('*').eq('id',me.building_id).single();
+    building = b;
+  }
+  route();
+}
+function route(){
+  if(!me){ renderAuth(); return; }
+  if(!me.building_id){
+    if(me.role==='manager') renderSetupManager(); else renderSetupResident();
+    return;
+  }
+  if(me.role==='manager') renderManager(); else renderResident();
+}
+
+/* ---------- ورود و ثبت‌نام ---------- */
+let authTab='login';
+function renderAuth(){
+  app.innerHTML = `
+  <div class="container" style="max-width:440px;margin-top:40px">
+    <h1 style="text-align:center;color:#16a085">🏢 شارژیار</h1>
+    <p class="sub" style="text-align:center">مدیریت شارژ ساختمان، ساده و شفاف</p>
+    <div class="card">
+      <div class="tabs">
+        <button class="${authTab==='login'?'active':''}" onclick="setTab('login')">ورود</button>
+        <button class="${authTab==='signup'?'active':''}" onclick="setTab('signup')">ثبت‌نام</button>
+      </div>
+      ${authTab==='login' ? `
+        <input id="li-email" type="email" placeholder="ایمیل">
+        <input id="li-pass" type="password" placeholder="رمز عبور">
+        <button class="btn" style="width:100%" onclick="logIn()">ورود</button>
+      `:`
+        <input id="su-name" placeholder="نام و نام خانوادگی">
+        <input id="su-email" type="email" placeholder="ایمیل">
+        <input id="su-pass" type="password" placeholder="رمز عبور (حداقل ۶ کاراکتر)">
+        <select id="su-role">
+          <option value="manager">مدیر ساختمان هستم</option>
+          <option value="resident">ساکن هستم</option>
+        </select>
+        <button class="btn" style="width:100%" onclick="signUp()">ساخت حساب</button>
+      `}
+      <p id="auth-msg" class="muted" style="margin-top:10px;text-align:center"></p>
+    </div>
+  </div>`;
+}
+function setTab(t){authTab=t;renderAuth();}
+function msg(m){document.getElementById('auth-msg').textContent=m;}
+async function signUp(){
+  const name=document.getElementById('su-name').value.trim();
+  const email=document.getElementById('su-email').value.trim();
+  const pass=document.getElementById('su-pass').value;
+  const role=document.getElementById('su-role').value;
+  if(!name||!email||pass.length<6){msg('همه فیلدها را درست پر کنید');return;}
+  msg('در حال ساخت حساب...');
+  const {error} = await sb.auth.signUp({email,password:pass});
+  if(error){msg('خطا: '+error.message);return;}
+  const {data:{user}} = await sb.auth.getUser();
+  const {error:pErr} = await sb.from('profiles').insert({id:user.id,full_name:name,role:role});
+  if(pErr){msg('خطا در ساخت پروفایل: '+pErr.message);return;}
+  await loadMe();
+}
+async function logIn(){
+  const email=document.getElementById('li-email').value.trim();
+  const pass=document.getElementById('li-pass').value;
+  msg('در حال ورود...');
+  const {error} = await sb.auth.signInWithPassword({email,password:pass});
+  if(error){msg('خطا: '+error.message);return;}
+  await loadMe();
+}
+async function logOut(){await sb.auth.signOut();me=null;building=null;renderAuth();}
+
+/* ---------- راه‌اندازی اولیه ---------- */
+function renderSetupManager(){
+  app.innerHTML=`
+  <div class="container" style="max-width:440px;margin-top:40px">
+    <div class="card">
+      <h2>ساخت ساختمان</h2>
+      <p class="sub">سلام ${me.full_name}! نام ساختمان را وارد کنید:</p>
+      <input id="b-name" placeholder="مثلاً: برج نگین">
+      <button class="btn" style="width:100%" onclick="createBuilding()">ساخت ساختمان</button>
+      <p id="s-msg" class="muted" style="margin-top:10px;text-align:center"></p>
+    </div>
+  </div>`;
+}
+async function createBuilding(){
+  const name=document.getElementById('b-name').value.trim();
+  if(!name){document.getElementById('s-msg').textContent='نام را وارد کنید';return;}
+  document.getElementById('s-msg').textContent='در حال ساخت...';
+  let error=null,data=null;
+  for(let i=0;i<5;i++){
+    const res = await sb.from('buildings').insert({name:name,join_code:genCode()}).select().single();
+    error=res.error; data=res.data;
+    if(!error) break;
+  }
+  if(error){document.getElementById('s-msg').textContent='خطا: '+error.message;return;}
+  await sb.from('profiles').update({building_id:data.id}).eq('id',me.id);
+  await loadMe();
+}
+function renderSetupResident(){
+  app.innerHTML=`
+  <div class="container" style="max-width:440px;margin-top:40px">
+    <div class="card">
+      <h2>عضویت در ساختمان</h2>
+      <p class="sub">کد ساختمان را از مدیر بگیرید:</p>
+      <input id="j-code" placeholder="کد ۶ حرفی ساختمان" style="text-align:center;letter-spacing:3px;text-transform:uppercase">
+      <input id="j-unit" placeholder="شماره واحد شما (مثلاً ۳)">
+      <button class="btn" style="width:100%" onclick="joinBuilding()">عضویت</button>
+      <p id="s-msg" class="muted" style="margin-top:10px;text-align:center"></p>
+    </div>
+  </div>`;
+}
+async function joinBuilding(){
+  const code=document.getElementById('j-code').value.trim().toUpperCase();
+  const unit=document.getElementById('j-unit').value.trim();
+  if(!code||!unit){document.getElementById('s-msg').textContent='هر دو فیلد را پر کنید';return;}
+  const {data:b,error} = await sb.from('buildings').select('*').eq('join_code',code).single();
+  if(error||!b){document.getElementById('s-msg').textContent='ساختمانی با این کد پیدا نشد';return;}
+  const {error:uErr} = await sb.from('profiles').update({building_id:b.id,unit_number:unit}).eq('id',me.id);
+  if(uErr){document.getElementById('s-msg').textContent='خطا: '+uErr.message;return;}
+  await loadMe();
+}
+
+/* ---------- قالب مشترک ---------- */
+function topbar(){
+  return `<div class="topbar">
+    <div class="brand">🏢 شارژیار — ${building.name}</div>
+    <div style="display:flex;gap:8px;align-items:center">
+      <span class="muted">${me.full_name} (${me.role==='manager'?'مدیر':'واحد '+toFa(me.unit_number)})</span>
+      <button class="btn btn-gray btn-sm" onclick="logOut()">خروج</button>
+    </div>
+  </div>`;
+}
+function copyCode(){
+  if(navigator.clipboard){navigator.clipboard.writeText(building.join_code);}
+  alert('کد ساختمان: '+building.join_code);
+}
+
+/* ---------- پنل مدیر ---------- */
+let managerMonth = currentMonth;
+async function renderManager(){
+  app.innerHTML = topbar()+`<div class="container"><p class="empty">در حال بارگذاری…</p></div>`;
+  const [rE,rX,rP] = await Promise.all([
+    sb.from('profiles').select('*').eq('building_id',building.id).eq('role','resident'),
+    sb.from('expenses').select('*').eq('building_id',building.id).eq('month',managerMonth).order('created_at'),
+    sb.from('payments').select('*').eq('building_id',building.id).eq('month',managerMonth)
+  ]);
+  const residents=rE.data||[], expenses=rX.data||[], payments=rP.data||[];
+  const total = expenses.reduce((s,e)=>s+Number(e.amount),0);
+  const units = [...new Set(residents.map(r=>r.unit_number))];
+  const charge = units.length? Math.ceil(total/units.length):0;
+  app.innerHTML = topbar()+`
+  <div class="container">
+    <div class="card">
+      <h2>کد دعوت ساکنین</h2>
+      <p class="sub">این کد را به ساکنین بدهید تا در سایت عضو شوند:</p>
+      <div class="code-box"><b>${building.join_code}</b><button class="btn btn-sm" onclick="copyCode()">کپی</button></div>
+    </div>
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <h2 style="margin:0">هزینه‌های ماه</h2>
+        <input id="m-month" value="${managerMonth}" onchange="managerMonth=this.value;renderManager()" style="width:auto;margin:0;padding:8px 12px">
+      </div>
+      <div class="stat-row">
+        <div class="stat"><div class="t">جمع هزینه‌ها</div><div class="v">${fmt(total)} تومان</div></div>
+        <div class="stat"><div class="t">سهم هر واحد</div><div class="v">${fmt(charge)} تومان</div></div>
+        <div class="stat"><div class="t">تعداد واحدها</div><div class="v">${fmt(units.length)}</div></div>
+      </div>
+      ${units.length===0?`<p class="empty">هنوز هیچ ساکنی عضو نشده است. کد دعوت را برایشان بفرستید!</p>`:``}
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <input id="e-title" placeholder="عنوان هزینه (مثلاً نظافت)" style="flex:2;min-width:150px;margin-bottom:0">
+        <input id="e-amount" type="number" placeholder="مبلغ (تومان)" style="flex:2;min-width:150px;margin-bottom:0">
+        <button class="btn" onclick="addExpense()">افزودن</button>
+      </div>
+      <div style="margin-top:16px">
+      ${expenses.length? expenses.map(e=>`
+        <div class="exp-item">
+          <span>${e.title}</span>
+          <span style="display:flex;gap:10px;align-items:center">
+            <b>${fmt(e.amount)} تومان</b>
+            <button class="btn btn-red btn-sm" onclick="deleteExpense('${e.id}')">حذف</button>
+          </span>
+        </div>`).join('') : `<p class="empty">برای این ماه هزینه‌ای ثبت نشده</p>`}
+      </div>
+    </div>
+    <div class="card">
+      <h2>وضعیت واحدها — ${managerMonth}</h2>
+      ${residents.length? `
+      <table>
+        <tr><th>واحد</th><th>ساکن</th><th>وضعیت</th><th></th></tr>
+        ${residents.map(r=>{
+          const p=payments.find(x=>x.unit_number===r.unit_number);
+          const st = !p?`<span class="badge b-debt">بدهکار</span>` : p.confirmed?`<span class="badge b-ok">پرداخت شد ✓</span>`:`<span class="badge b-wait">منتظر تأیید</span>`;
+          const act = (p&&!p.confirmed)?`<button class="btn btn-sm" onclick="confirmPayment('${p.id}')">تأیید پرداخت</button>`:'';
+          return `<tr><td>${toFa(r.unit_number)}</td><td>${r.full_name}</td><td>${st}</td><td>${act}</td></tr>`;
+        }).join('')}
+      </table>`:`<p class="empty">هنوز ساکنی عضو نشده است</p>`}
+    </div>
+  </div>`;
+}
+async function addExpense(){
+  const t=document.getElementById('e-title').value.trim();
+  const a=parseInt(document.getElementById('e-amount').value);
+  if(!t||!a||a<=0){alert('عنوان و مبلغ را درست وارد کنید');return;}
+  const {error}=await sb.from('expenses').insert({building_id:building.id,title:t,amount:a,month:managerMonth});
+  if(error){alert('خطا: '+error.message);return;}
+  renderManager();
+}
+async function deleteExpense(id){
+  await sb.from('expenses').delete().eq('id',id);
+  renderManager();
+}
+async function confirmPayment(id){
+  await sb.from('payments').update({confirmed:true}).eq('id',id);
+  renderManager();
+}
+
+/* ---------- پنل ساکن ---------- */
+let residentCharge=0;
+async function renderResident(){
+  app.innerHTML=topbar()+`<div class="container"><p class="empty">در حال بارگذاری…</p></div>`;
+  const month=currentMonth;
+  const [rE,rR,rP,rH]=await Promise.all([
+    sb.from('expenses').select('*').eq('building_id',building.id).eq('month',month),
+    sb.from('profiles').select('*').eq('building_id',building.id).eq('role','resident'),
+    sb.from('payments').select('*').eq('building_id',building.id).eq('month',month).eq('unit_number',me.unit_number).maybeSingle(),
+    sb.from('payments').select('*').eq('building_id',building.id).eq('unit_number',me.unit_number).order('created_at')
+  ]);
+  const expenses=rE.data||[], residents=rR.data||[], myPayment=rP.data, history=rH.data||[];
+  const total=expenses.reduce((s,e)=>s+Number(e.amount),0);
+  const units=new Set(residents.map(r=>r.unit_number));
+  residentCharge = units.size? Math.ceil(total/units.size):0;
+  let statusHtml;
+  if(!myPayment){
+    statusHtml = `<p style="margin-bottom:12px">وضعیت: <span class="badge b-debt">پرداخت نشده</span></p>
+      <button class="btn" onclick="markPaid()">پرداخت کردم (کارت به کارت) ✓</button>
+      <p class="muted" style="margin-top:8px">بعد از کارت‌به‌کارت به مدیر، این دکمه را بزنید تا مدیر تأیید کند.</p>`;
+  } else if(!myPayment.confirmed){
+    statusHtml = `<p>وضعیت: <span class="badge b-wait">در انتظار تأیید مدیر</span></p>`;
+  } else {
+    statusHtml = `<p>وضعیت: <span class="badge b-ok">پرداخت شد ✓</span></p>`;
+  }
+  app.innerHTML=topbar()+`
+  <div class="container">
+    <div class="card" style="text-align:center">
+      <p class="sub" style="margin-bottom:6px">شارژ ماه ${month} — واحد ${toFa(me.unit_number)}</p>
+      <div style="font-size:34px;font-weight:bold;color:#0e6655;margin-bottom:14px">${fmt(residentCharge)} تومان</div>
+      ${statusHtml}
+    </div>
+    <div class="card">
+      <h2>ریز هزینه‌های ${month}</h2>
+      ${expenses.length? expenses.map(e=>`<div class="exp-item"><span>${e.title}</span><b>${fmt(e.amount)} تومان</b></div>`).join(''):`<p class="empty">هزینه‌ای ثبت نشده</p>`}
+      <div class="exp-item" style="border-top:2px solid #16a085"><span><b>جمع</b></span><b>${fmt(total)} تومان</b></div>
+    </div>
+    <div class="card">
+      <h2>تاریخچه پرداخت‌های من</h2>
+      ${history.length? `<table><tr><th>ماه</th><th>مبلغ</th><th>وضعیت</th></tr>
+      ${history.map(h=>`<tr><td>${h.month}</td><td>${fmt(h.amount)} تومان</td><td>${h.confirmed?`<span class="badge b-ok">تأیید شده</span>`:`<span class="badge b-wait">منتظر تأیید</span>`}</td></tr>`).join('')}
+      </table>`:`<p class="empty">هنوز پرداختی ثبت نشده</p>`}
+    </div>
+  </div>`;
+}
+async function markPaid(){
+  const {error} = await sb.from('payments').insert({building_id:building.id,unit_number:me.unit_number,month:currentMonth,amount:residentCharge,confirmed:false});
+  if(error){alert('خطا: '+error.message);return;}
+  renderResident();
+}
+
+init();
+</script>
+</body>
+</html>
